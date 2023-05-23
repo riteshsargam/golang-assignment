@@ -1,0 +1,116 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/dgrijalva/jwt-go"
+)
+
+// User represents the user data structure
+type User struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	Phone string `json:"phone"`
+}
+
+// JWTClaims represents the JWT claims structure
+type JWTClaims struct {
+	Email string `json:"email"`
+	jwt.StandardClaims
+}
+
+var jwtSecret = []byte("your_secret_key")
+
+// authHandler handles the authentication request
+func authHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse the request body
+	var credentials struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&credentials); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Perform authentication logic (e.g., check email and password against a database)
+	isValidCredentials := authenticate(credentials.Email, credentials.Password)
+	if !isValidCredentials {
+		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		return
+	}
+
+	// Generate JWT token
+	token, err := generateJWTToken(credentials.Email)
+	if err != nil {
+		http.Error(w, "Failed to generate JWT token", http.StatusInternalServerError)
+		return
+	}
+
+	// Return the token in the response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"token": token,
+	})
+}
+
+// userHandler handles the user data storage request
+func userHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse the JWT token from the request header
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Validate and parse the JWT token
+	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
+		return jwtSecret, nil
+	})
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	claims, ok := token.Claims.(*JWTClaims)
+	if !ok || !token.Valid {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Parse the user data from the request body
+	var user User
+	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Store the user data (e.g., save it to a database)
+	err = storeUserData(claims.Email, user)
+	if err != nil {
+		http.Error(w, "Failed to store user data", http.StatusInternalServerError)
+		return
+	}
+
+	// Return success response
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "User data stored successfully")
+}
+
+// authenticate simulates the authentication logic
+func authenticate(email, password string) bool {
+	// Simulate checking email and password against a database
+	// Replace this with your own authentication logic
+	return email == "user@example.com" && password == "password"
+}
+
+// generateJWTToken generates a JWT token with the given email as a claim
+func generateJWTToken(email string) (string, error) {
+	claims := JWTClaims{
+		Email: email,
+		StandardClaims: jwt.StandardClaims
